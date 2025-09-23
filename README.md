@@ -66,7 +66,7 @@ Deployment & Demo: ⏳ Pending
 👥 Team Members
 Name	Reg. No.	Contribution
 Md. Sadman Saquib	2022331002	Backend, Database
-Mollah Omar Hamza	2022331062	AI/ML Integration
+Mollah Omar Hamza	2022331066	AI/ML Integration
 Ahmed Istiaque	2022331100	Frontend, UI/UX, Backend
 📖 References
 
