@@ -67,7 +67,7 @@ Deployment & Demo: ⏳ Pending
 Name	Reg. No.	Contribution
 Md. Sadman Saquib	2022331002	Backend, Database
 Mollah Omar Hamza	2022331066	AI/ML Integration
-Ahmed Istiaque	2022331100	Frontend, UI/UX, Backend
+Ahmed Istiaque	2022331100	Frontend, UI/UX, Backend & Security
 📖 References
 
 Django & FastAPI Documentation
