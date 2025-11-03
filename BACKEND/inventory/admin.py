@@ -1,6 +1,8 @@
 from django.contrib import admin
-from .models import Item
+from .models import InventoryItem
 
-# Register your models here.
-
-admin.site.register(Item)
+@admin.register(InventoryItem)
+class InventoryItemAdmin(admin.ModelAdmin):
+    list_display = ['name', 'category', 'quantity', 'unit', 'status', 'created_at']
+    list_filter = ['category', 'created_at']
+    search_fields = ['name', 'category']
