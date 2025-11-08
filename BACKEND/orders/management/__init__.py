@@ -1,0 +1,1 @@
+# Ensure Django discovers management commands in this app

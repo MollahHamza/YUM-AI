@@ -1,24 +1,57 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { InventoryAPI } from '../lib/api';
 
 function Inventory() {
-  const [inventoryItems, setInventoryItems] = useState([
-    { id: 1, name: 'Beef Patties', category: 'Meat', quantity: 120, unit: 'pcs', status: 'In Stock' },
-    { id: 2, name: 'Hamburger Buns', category: 'Bread', quantity: 80, unit: 'pcs', status: 'In Stock' },
-    { id: 3, name: 'Lettuce', category: 'Vegetables', quantity: 5, unit: 'kg', status: 'Low Stock' },
-    { id: 4, name: 'Tomatoes', category: 'Vegetables', quantity: 8, unit: 'kg', status: 'In Stock' },
-    { id: 5, name: 'Cheese Slices', category: 'Dairy', quantity: 50, unit: 'pcs', status: 'In Stock' },
-    { id: 6, name: 'Bacon', category: 'Meat', quantity: 3, unit: 'kg', status: 'Low Stock' },
-    { id: 7, name: 'Chicken Breast', category: 'Meat', quantity: 15, unit: 'kg', status: 'In Stock' },
-    { id: 8, name: 'Potatoes', category: 'Vegetables', quantity: 25, unit: 'kg', status: 'In Stock' },
-    { id: 9, name: 'Cooking Oil', category: 'Condiments', quantity: 2, unit: 'L', status: 'Low Stock' },
-  ]);
-
+  const [inventoryItems, setInventoryItems] = useState([]);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [editingItem, setEditingItem] = useState(null);
   const [newQuantity, setNewQuantity] = useState('');
+  const [stats, setStats] = useState({ total_items: 0, low_stock_items: 0, categories: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Get unique categories
+  const loadItems = async (params = {}) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const items = await InventoryAPI.list(params);
+      const normalized = (items || []).map(it => ({
+        id: it.id,
+        name: it.name,
+        category: it.category || 'Unknown',
+        quantity: it.quantity,
+        unit: it.unit || '',
+        status: (it.quantity <= 5) ? 'Low Stock' : 'In Stock',
+      }));
+      setInventoryItems(normalized);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const s = await InventoryAPI.stats();
+      setStats({
+        total_items: s.total_items ?? 0,
+        low_stock_items: s.low_stock_items ?? 0,
+        categories: s.categories ?? 0,
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    loadItems({});
+    loadStats();
+  }, []);
+
+  // Get unique categories from loaded items
   const categories = ['All', ...new Set(inventoryItems.map(item => item.category))];
 
   // Filter items based on search and category
@@ -34,18 +67,25 @@ function Inventory() {
     setNewQuantity(item.quantity.toString());
   };
 
-  // Save edited quantity
-  const saveEdit = (id) => {
-    setInventoryItems(inventoryItems.map(item => 
-      item.id === id 
-        ? { 
-            ...item, 
-            quantity: parseInt(newQuantity), 
-            status: parseInt(newQuantity) <= 5 ? 'Low Stock' : 'In Stock'
-          } 
-        : item
-    ));
-    setEditingItem(null);
+  // Save edited quantity to backend
+  const saveEdit = async (id) => {
+    try {
+      const qty = parseInt(newQuantity);
+      await InventoryAPI.patch(id, { quantity: qty });
+      setInventoryItems(inventoryItems.map(item => 
+        item.id === id 
+          ? { 
+              ...item, 
+              quantity: qty, 
+              status: qty <= 5 ? 'Low Stock' : 'In Stock'
+            } 
+          : item
+      ));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setEditingItem(null);
+    }
   };
 
   // Cancel editing
@@ -64,13 +104,27 @@ function Inventory() {
             placeholder="Search inventory..." 
             className="inventory-search" 
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={async (e) => {
+              const val = e.target.value;
+              setSearchTerm(val);
+              const params = {};
+              if (val) params.search = val;
+              if (selectedCategory !== 'All') params.category = selectedCategory;
+              await loadItems(params);
+            }}
           />
           
           <select 
             className="category-filter"
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            onChange={async (e) => {
+              const cat = e.target.value;
+              setSelectedCategory(cat);
+              const params = {};
+              if (searchTerm) params.search = searchTerm;
+              if (cat !== 'All') params.category = cat;
+              await loadItems(params);
+            }}
           >
             {categories.map(category => (
               <option key={category} value={category}>{category}</option>
@@ -139,17 +193,18 @@ function Inventory() {
       <div className="inventory-summary">
         <div className="summary-card">
           <h3>Total Items</h3>
-          <p>{inventoryItems.length}</p>
+          <p>{stats.total_items || inventoryItems.length}</p>
         </div>
         <div className="summary-card">
           <h3>Low Stock Items</h3>
-          <p>{inventoryItems.filter(item => item.status === 'Low Stock').length}</p>
+          <p>{stats.low_stock_items ?? inventoryItems.filter(item => item.status === 'Low Stock').length}</p>
         </div>
         <div className="summary-card">
           <h3>Categories</h3>
-          <p>{categories.length - 1}</p>
+          <p>{stats.categories ?? (categories.length - 1)}</p>
         </div>
       </div>
+      {error && <p className="error-text">{error}</p>}
     </div>
   );
 }

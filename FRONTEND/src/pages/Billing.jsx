@@ -1,29 +1,44 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { OrdersAPI } from '../lib/api';
 
 function Billing() {
   const [cart, setCart] = useState([]);
   const [activeTab, setActiveTab] = useState('pos');
-  
-  // Menu items for POS
-  const menuItems = [
-    { id: 1, name: 'Cheeseburger', price: 8.99, category: 'Burgers' },
-    { id: 2, name: 'Chicken Sandwich', price: 7.99, category: 'Sandwiches' },
-    { id: 3, name: 'Caesar Salad', price: 6.99, category: 'Salads' },
-    { id: 4, name: 'French Fries', price: 3.99, category: 'Sides' },
-    { id: 5, name: 'Onion Rings', price: 4.99, category: 'Sides' },
-    { id: 6, name: 'Soda', price: 1.99, category: 'Drinks' },
-    { id: 7, name: 'Milkshake', price: 4.99, category: 'Drinks' },
-    { id: 8, name: 'Pizza', price: 12.99, category: 'Main' },
-    { id: 9, name: 'Pasta', price: 10.99, category: 'Main' },
-  ];
-  
-  // Recent invoices for billing tab
-  const invoices = [
-    { id: 'INV-001', customer: 'John Smith', date: '2023-06-15', amount: 45.99, status: 'Paid' },
-    { id: 'INV-002', customer: 'Sarah Johnson', date: '2023-06-14', amount: 32.50, status: 'Pending' },
-    { id: 'INV-003', customer: 'Michael Brown', date: '2023-06-13', amount: 78.25, status: 'Paid' },
-    { id: 'INV-004', customer: 'Emily Davis', date: '2023-06-12', amount: 22.75, status: 'Overdue' },
-  ];
+  const [customerName, setCustomerName] = useState('');
+  const [menuItems, setMenuItems] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      setError(null);
+      try {
+        const [menu, bills] = await Promise.all([
+          OrdersAPI.getMenuItems(),
+          OrdersAPI.getBillingHistory(),
+        ]);
+        // Normalize price to number for calculation
+        setMenuItems((menu || []).map(m => ({
+          id: m.id,
+          name: m.name,
+          price: typeof m.price === 'string' ? parseFloat(m.price) : m.price,
+          category: m.category || 'Menu',
+        })));
+        setInvoices((bills || []).map(b => ({
+          id: b.id,
+          customer: b.customer_name || 'Unknown',
+          date: b.order_date ? new Date(b.order_date).toLocaleDateString() : '',
+          amount: typeof b.total_amount === 'string' ? parseFloat(b.total_amount) : (b.total_amount || 0),
+          status: b.status || 'Paid',
+          order_number: b.order_number,
+        })));
+      } catch (e) {
+        setError(e.message);
+      }
+    };
+    load();
+  }, []);
 
   // Add item to cart
   const addToCart = (item) => {
@@ -65,10 +80,36 @@ function Billing() {
     setCart([]);
   };
 
-  // Process payment
-  const processPayment = () => {
-    alert(`Payment processed for $${calculateTotal()}`);
-    clearCart();
+  // Process payment via backend
+  const processPayment = async () => {
+    try {
+      if (cart.length === 0) {
+        alert('Cart is empty');
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      const items = cart.map(ci => ({ menu_item_id: ci.id, quantity: ci.quantity }));
+      const order = await OrdersAPI.createOrder({ customer_name: customerName || 'Unknown', items });
+      const paid = await OrdersAPI.payOrder({ order_id: order.id });
+      alert(`Payment successful: ${paid.order_number} - $${paid.total_amount}`);
+      clearCart();
+      setCustomerName('');
+      // Refresh billing history
+      const bills = await OrdersAPI.getBillingHistory();
+      setInvoices((bills || []).map(b => ({
+        id: b.id,
+        customer: b.customer_name || 'Unknown',
+        date: b.order_date ? new Date(b.order_date).toLocaleDateString() : '',
+        amount: typeof b.total_amount === 'string' ? parseFloat(b.total_amount) : (b.total_amount || 0),
+        status: b.status || 'Paid',
+        order_number: b.order_number,
+      })));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -113,6 +154,16 @@ function Billing() {
               <p className="empty-cart-message">No items in cart</p>
             ) : (
               <>
+                <div className="customer-input">
+                  <label>Customer Name</label>
+                  <input
+                    type="text"
+                    className="inventory-search"
+                    placeholder="Enter customer name"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                  />
+                </div>
                 <div className="cart-items">
                   {cart.map(item => (
                     <div key={item.id} className="cart-item">
@@ -135,12 +186,13 @@ function Billing() {
                     <h3>${calculateTotal()}</h3>
                   </div>
                   <div className="cart-actions">
-                    <button className="clear-btn" onClick={clearCart}>Clear</button>
-                    <button className="pay-btn" onClick={processPayment}>Pay Now</button>
+                    <button className="clear-btn" onClick={clearCart} disabled={loading}>Clear</button>
+                    <button className="pay-btn" onClick={processPayment} disabled={loading}>Pay Now</button>
                   </div>
                 </div>
               </>
             )}
+            {error && <p className="error-text">{error}</p>}
           </div>
         </div>
       ) : (
@@ -161,7 +213,7 @@ function Billing() {
               <tbody>
                 {invoices.map(invoice => (
                   <tr key={invoice.id}>
-                    <td>{invoice.id}</td>
+                    <td>{invoice.order_number || invoice.id}</td>
                     <td>{invoice.customer}</td>
                     <td>{invoice.date}</td>
                     <td>${invoice.amount}</td>
@@ -178,6 +230,7 @@ function Billing() {
                 ))}
               </tbody>
             </table>
+            {error && <p className="error-text">{error}</p>}
           </div>
         </div>
       )}
