@@ -57,4 +57,21 @@ export const DashboardAPI = {
   stats: () => fetchJSON('/dashboard/stats/'),
 };
 
-export default { OrdersAPI, InventoryAPI, DashboardAPI };
+export const LLMAPI = {
+  chat: async ({ model = 'llama3.2:1b', messages = [], stream = false, options = {} }) => {
+    // Forward to local Ollama via Vite proxy
+    const res = await fetchJSON('/ollama/api/chat', {
+      method: 'POST',
+      body: {
+        model,
+        messages,
+        stream,
+        options,
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res;
+  },
+};
+
+export default { OrdersAPI, InventoryAPI, DashboardAPI, LLMAPI };

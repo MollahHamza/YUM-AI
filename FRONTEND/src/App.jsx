@@ -3,6 +3,9 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Billing from './pages/Billing';
 import Inventory from './pages/Inventory';
+import Reports from './pages/Reports';
+import Forecasting from './pages/Forecasting';
+import AIInsights from './pages/AIInsights';
 import UnderConstruction from './pages/UnderConstruction';
 import './App.css';
 import './pages/pages.css';
@@ -91,9 +94,9 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/inventory" element={<Inventory />} />
-          <Route path="/reports" element={<UnderConstruction pageName="Reports" />} />
-          <Route path="/forecasting" element={<UnderConstruction pageName="Forecasting" />} />
-          <Route path="/ai-insights" element={<UnderConstruction pageName="AI Insights" />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/forecasting" element={<Forecasting />} />
+          <Route path="/ai-insights" element={<AIInsights />} />
           <Route path="/settings" element={<UnderConstruction pageName="Settings" />} />
         </Routes>
       </div>
