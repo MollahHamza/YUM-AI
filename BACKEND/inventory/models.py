@@ -10,7 +10,7 @@ class InventoryItem(models.Model):
     
     @property
     def status(self):
-        """Returns 'Low Stock' if quantity < 5, else 'In Stock'"""
+        
         return "Low Stock" if self.quantity < 5 else "In Stock"
     
     def __str__(self):
