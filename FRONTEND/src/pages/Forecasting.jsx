@@ -9,7 +9,7 @@ function Forecasting() {
   const [aiLoading, setAiLoading] = useState(false);
   const [error, setError] = useState(null);
   const [plan, setPlan] = useState([]);
-  const [model, setModel] = useState('llama3.2:1b');
+  const [model, setModel] = useState('gemini-2.0-flash');
 
   useEffect(() => {
     const load = async () => {
@@ -117,7 +117,8 @@ function Forecasting() {
         <>
           <div className="controls-row">
             <select className="small-select" value={model} onChange={e => setModel(e.target.value)}>
-              <option value="llama3.2:1b">llama3.2:1b</option>
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
             </select>
             <button className="btn-secondary" onClick={() => exportJSON(plan, 'forecast_plan.json')}>Export Plan</button>
           </div>

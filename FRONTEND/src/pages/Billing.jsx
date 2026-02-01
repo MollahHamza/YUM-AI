@@ -10,44 +10,83 @@ function Billing() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Add menu item form
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', price: '', category: '' });
+
+  const loadData = async () => {
+    setError(null);
+    try {
+      const [menu, bills] = await Promise.all([
+        OrdersAPI.getMenuItems(),
+        OrdersAPI.getBillingHistory(),
+      ]);
+      setMenuItems((menu || []).map(m => ({
+        id: m.id,
+        name: m.name,
+        price: typeof m.price === 'string' ? parseFloat(m.price) : m.price,
+        category: m.category || 'Menu',
+      })));
+      setInvoices((bills || []).map(b => ({
+        id: b.id,
+        customer: b.customer_name || 'Unknown',
+        date: b.order_date ? new Date(b.order_date).toLocaleDateString() : '',
+        amount: typeof b.total_amount === 'string' ? parseFloat(b.total_amount) : (b.total_amount || 0),
+        status: b.status || 'Paid',
+        order_number: b.order_number,
+      })));
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   useEffect(() => {
-    const load = async () => {
-      setError(null);
-      try {
-        const [menu, bills] = await Promise.all([
-          OrdersAPI.getMenuItems(),
-          OrdersAPI.getBillingHistory(),
-        ]);
-        // Normalize price to number for calculation
-        setMenuItems((menu || []).map(m => ({
-          id: m.id,
-          name: m.name,
-          price: typeof m.price === 'string' ? parseFloat(m.price) : m.price,
-          category: m.category || 'Menu',
-        })));
-        setInvoices((bills || []).map(b => ({
-          id: b.id,
-          customer: b.customer_name || 'Unknown',
-          date: b.order_date ? new Date(b.order_date).toLocaleDateString() : '',
-          amount: typeof b.total_amount === 'string' ? parseFloat(b.total_amount) : (b.total_amount || 0),
-          status: b.status || 'Paid',
-          order_number: b.order_number,
-        })));
-      } catch (e) {
-        setError(e.message);
-      }
-    };
-    load();
+    loadData();
   }, []);
+
+  // Add menu item
+  const handleAddMenuItem = async (e) => {
+    e.preventDefault();
+    if (!newItem.name || !newItem.price || !newItem.category) {
+      alert('Please fill all fields');
+      return;
+    }
+    try {
+      setLoading(true);
+      await OrdersAPI.createMenuItem({
+        name: newItem.name,
+        price: parseFloat(newItem.price),
+        category: newItem.category
+      });
+      setNewItem({ name: '', price: '', category: '' });
+      setShowAddItem(false);
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete menu item
+  const handleDeleteMenuItem = async (id) => {
+    if (!confirm('Delete this menu item?')) return;
+    try {
+      await OrdersAPI.deleteMenuItem(id);
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   // Add item to cart
   const addToCart = (item) => {
     const existingItem = cart.find(cartItem => cartItem.id === item.id);
-    
+
     if (existingItem) {
-      setCart(cart.map(cartItem => 
-        cartItem.id === item.id 
-          ? { ...cartItem, quantity: cartItem.quantity + 1 } 
+      setCart(cart.map(cartItem =>
+        cartItem.id === item.id
+          ? { ...cartItem, quantity: cartItem.quantity + 1 }
           : cartItem
       ));
     } else {
@@ -58,13 +97,13 @@ function Billing() {
   // Remove item from cart
   const removeFromCart = (itemId) => {
     const existingItem = cart.find(item => item.id === itemId);
-    
+
     if (existingItem.quantity === 1) {
       setCart(cart.filter(item => item.id !== itemId));
     } else {
-      setCart(cart.map(item => 
-        item.id === itemId 
-          ? { ...item, quantity: item.quantity - 1 } 
+      setCart(cart.map(item =>
+        item.id === itemId
+          ? { ...item, quantity: item.quantity - 1 }
           : item
       ));
     }
@@ -95,16 +134,7 @@ function Billing() {
       alert(`Payment successful: ${paid.order_number} - $${paid.total_amount}`);
       clearCart();
       setCustomerName('');
-      // Refresh billing history
-      const bills = await OrdersAPI.getBillingHistory();
-      setInvoices((bills || []).map(b => ({
-        id: b.id,
-        customer: b.customer_name || 'Unknown',
-        date: b.order_date ? new Date(b.order_date).toLocaleDateString() : '',
-        amount: typeof b.total_amount === 'string' ? parseFloat(b.total_amount) : (b.total_amount || 0),
-        status: b.status || 'Paid',
-        order_number: b.order_number,
-      })));
+      await loadData();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -115,39 +145,54 @@ function Billing() {
   return (
     <div className="page-container">
       <h1 className="page-title">Billing & POS</h1>
-      
+
       <div className="tab-navigation">
-        <button 
+        <button
           className={`tab-button ${activeTab === 'pos' ? 'active' : ''}`}
           onClick={() => setActiveTab('pos')}
         >
           Point of Sale
         </button>
-        <button 
+        <button
+          className={`tab-button ${activeTab === 'menu' ? 'active' : ''}`}
+          onClick={() => setActiveTab('menu')}
+        >
+          Menu Items
+        </button>
+        <button
           className={`tab-button ${activeTab === 'billing' ? 'active' : ''}`}
           onClick={() => setActiveTab('billing')}
         >
           Billing History
         </button>
       </div>
-      
+
       {activeTab === 'pos' ? (
         <div className="pos-container">
           <div className="menu-section">
             <h2 className="section-title">Menu Items</h2>
-            <div className="menu-grid">
-              {menuItems.map(item => (
-                <div key={item.id} className="menu-item" onClick={() => addToCart(item)}>
-                  <div className="menu-item-details">
-                    <h3>{item.name}</h3>
-                    <p className="menu-item-category">{item.category}</p>
-                    <p className="menu-item-price">${item.price.toFixed(2)}</p>
+            {menuItems.length === 0 ? (
+              <div className="empty-state">
+                <p>No menu items yet.</p>
+                <button className="action-btn" onClick={() => setActiveTab('menu')}>
+                  Add Menu Items
+                </button>
+              </div>
+            ) : (
+              <div className="menu-grid">
+                {menuItems.map(item => (
+                  <div key={item.id} className="menu-item" onClick={() => addToCart(item)}>
+                    <div className="menu-item-details">
+                      <h3>{item.name}</h3>
+                      <p className="menu-item-category">{item.category}</p>
+                      <p className="menu-item-price">${item.price.toFixed(2)}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-          
+
           <div className="cart-section">
             <h2 className="section-title">Current Order</h2>
             {cart.length === 0 ? (
@@ -179,7 +224,7 @@ function Billing() {
                     </div>
                   ))}
                 </div>
-                
+
                 <div className="cart-summary">
                   <div className="cart-total">
                     <h3>Total:</h3>
@@ -187,13 +232,94 @@ function Billing() {
                   </div>
                   <div className="cart-actions">
                     <button className="clear-btn" onClick={clearCart} disabled={loading}>Clear</button>
-                    <button className="pay-btn" onClick={processPayment} disabled={loading}>Pay Now</button>
+                    <button className="pay-btn" onClick={processPayment} disabled={loading}>
+                      {loading ? 'Processing...' : 'Pay Now'}
+                    </button>
                   </div>
                 </div>
               </>
             )}
             {error && <p className="error-text">{error}</p>}
           </div>
+        </div>
+      ) : activeTab === 'menu' ? (
+        <div className="billing-container">
+          <div className="section-header">
+            <h2 className="section-title">Manage Menu Items</h2>
+            <button className="add-item-btn" onClick={() => setShowAddItem(!showAddItem)}>
+              {showAddItem ? 'Cancel' : '+ Add Item'}
+            </button>
+          </div>
+
+          {showAddItem && (
+            <form onSubmit={handleAddMenuItem} className="add-item-form">
+              <div className="form-row">
+                <input
+                  type="text"
+                  placeholder="Item name"
+                  value={newItem.name}
+                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                  required
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Price"
+                  value={newItem.price}
+                  onChange={(e) => setNewItem({ ...newItem, price: e.target.value })}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Category (e.g., Drinks, Food)"
+                  value={newItem.category}
+                  onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
+                  required
+                />
+                <button type="submit" className="save-btn" disabled={loading}>
+                  {loading ? 'Adding...' : 'Add'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          <table className="invoices-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {menuItems.length === 0 ? (
+                <tr>
+                  <td colSpan="4" style={{ textAlign: 'center', padding: '20px' }}>
+                    No menu items. Add your first item above.
+                  </td>
+                </tr>
+              ) : (
+                menuItems.map(item => (
+                  <tr key={item.id}>
+                    <td>{item.name}</td>
+                    <td>{item.category}</td>
+                    <td>${item.price.toFixed(2)}</td>
+                    <td>
+                      <button
+                        className="action-btn"
+                        onClick={() => handleDeleteMenuItem(item.id)}
+                        style={{ color: '#e74c3c' }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+          {error && <p className="error-text">{error}</p>}
         </div>
       ) : (
         <div className="billing-container">
@@ -211,23 +337,31 @@ function Billing() {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map(invoice => (
-                  <tr key={invoice.id}>
-                    <td>{invoice.order_number || invoice.id}</td>
-                    <td>{invoice.customer}</td>
-                    <td>{invoice.date}</td>
-                    <td>${invoice.amount}</td>
-                    <td>
-                      <span className={`status-badge ${invoice.status.toLowerCase()}`}>
-                        {invoice.status}
-                      </span>
-                    </td>
-                    <td>
-                      <button className="action-btn">View</button>
-                      <button className="action-btn">Print</button>
+                {invoices.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>
+                      No billing history yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  invoices.map(invoice => (
+                    <tr key={invoice.id}>
+                      <td>{invoice.order_number || invoice.id}</td>
+                      <td>{invoice.customer}</td>
+                      <td>{invoice.date}</td>
+                      <td>${invoice.amount.toFixed(2)}</td>
+                      <td>
+                        <span className={`status-badge ${invoice.status.toLowerCase()}`}>
+                          {invoice.status}
+                        </span>
+                      </td>
+                      <td>
+                        <button className="action-btn">View</button>
+                        <button className="action-btn">Print</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
             {error && <p className="error-text">{error}</p>}

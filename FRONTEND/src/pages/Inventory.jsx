@@ -3,7 +3,6 @@ import { InventoryAPI } from '../lib/api';
 
 function Inventory() {
   const [inventoryItems, setInventoryItems] = useState([]);
-  
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [editingItem, setEditingItem] = useState(null);
@@ -11,6 +10,10 @@ function Inventory() {
   const [stats, setStats] = useState({ total_items: 0, low_stock_items: 0, categories: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Add new item form
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', category: '', quantity: '', unit: '' });
 
   const loadItems = async (params = {}) => {
     setError(null);
@@ -61,6 +64,44 @@ function Inventory() {
     return matchesSearch && matchesCategory;
   });
 
+  // Add new item
+  const handleAddItem = async (e) => {
+    e.preventDefault();
+    if (!newItem.name || !newItem.category || !newItem.quantity || !newItem.unit) {
+      alert('Please fill all fields');
+      return;
+    }
+    try {
+      setLoading(true);
+      await InventoryAPI.create({
+        name: newItem.name,
+        category: newItem.category,
+        quantity: parseFloat(newItem.quantity),
+        unit: newItem.unit
+      });
+      setNewItem({ name: '', category: '', quantity: '', unit: '' });
+      setShowAddForm(false);
+      await loadItems({});
+      await loadStats();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete item
+  const handleDeleteItem = async (id) => {
+    if (!confirm('Delete this item?')) return;
+    try {
+      await InventoryAPI.remove(id);
+      await loadItems({});
+      await loadStats();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   // Start editing an item
   const startEdit = (item) => {
     setEditingItem(item.id);
@@ -70,17 +111,18 @@ function Inventory() {
   // Save edited quantity to backend
   const saveEdit = async (id) => {
     try {
-      const qty = parseInt(newQuantity);
+      const qty = parseFloat(newQuantity);
       await InventoryAPI.patch(id, { quantity: qty });
-      setInventoryItems(inventoryItems.map(item => 
-        item.id === id 
-          ? { 
-              ...item, 
-              quantity: qty, 
+      setInventoryItems(inventoryItems.map(item =>
+        item.id === id
+          ? {
+              ...item,
+              quantity: qty,
               status: qty <= 5 ? 'Low Stock' : 'In Stock'
-            } 
+            }
           : item
       ));
+      await loadStats();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -96,13 +138,13 @@ function Inventory() {
   return (
     <div className="page-container">
       <h1 className="page-title">Inventory Management</h1>
-      
+
       <div className="inventory-controls">
         <div className="search-filter">
-          <input 
-            type="text" 
-            placeholder="Search inventory..." 
-            className="inventory-search" 
+          <input
+            type="text"
+            placeholder="Search inventory..."
+            className="inventory-search"
             value={searchTerm}
             onChange={async (e) => {
               const val = e.target.value;
@@ -113,8 +155,8 @@ function Inventory() {
               await loadItems(params);
             }}
           />
-          
-          <select 
+
+          <select
             className="category-filter"
             value={selectedCategory}
             onChange={async (e) => {
@@ -131,10 +173,51 @@ function Inventory() {
             ))}
           </select>
         </div>
-        
-        <button className="add-item-btn">+ Add New Item</button>
+
+        <button className="add-item-btn" onClick={() => setShowAddForm(!showAddForm)}>
+          {showAddForm ? 'Cancel' : '+ Add New Item'}
+        </button>
       </div>
-      
+
+      {showAddForm && (
+        <form onSubmit={handleAddItem} className="add-item-form">
+          <div className="form-row">
+            <input
+              type="text"
+              placeholder="Item name"
+              value={newItem.name}
+              onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Category"
+              value={newItem.category}
+              onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
+              required
+            />
+            <input
+              type="number"
+              step="0.01"
+              placeholder="Quantity"
+              value={newItem.quantity}
+              onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Unit (kg, pcs, L)"
+              value={newItem.unit}
+              onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
+              required
+            />
+            <button type="submit" className="save-btn" disabled={loading}>
+              {loading ? 'Adding...' : 'Add Item'}
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="inventory-table-container">
         <table className="inventory-table">
           <thead>
@@ -148,48 +231,63 @@ function Inventory() {
             </tr>
           </thead>
           <tbody>
-            {filteredItems.map(item => (
-              <tr key={item.id}>
-                <td>{item.name}</td>
-                <td>{item.category}</td>
-                <td>
-                  {editingItem === item.id ? (
-                    <input 
-                      type="number" 
-                      className="quantity-input" 
-                      value={newQuantity}
-                      onChange={(e) => setNewQuantity(e.target.value)}
-                      min="0"
-                    />
-                  ) : (
-                    item.quantity
-                  )}
-                </td>
-                <td>{item.unit}</td>
-                <td>
-                  <span className={`status-badge ${item.status === 'Low Stock' ? 'low-stock' : 'in-stock'}`}>
-                    {item.status}
-                  </span>
-                </td>
-                <td>
-                  {editingItem === item.id ? (
-                    <div className="edit-actions">
-                      <button className="save-btn" onClick={() => saveEdit(item.id)}>Save</button>
-                      <button className="cancel-btn" onClick={cancelEdit}>Cancel</button>
-                    </div>
-                  ) : (
-                    <div className="item-actions">
-                      <button className="edit-btn" onClick={() => startEdit(item)}>Edit</button>
-                      <button className="order-btn">Order</button>
-                    </div>
-                  )}
+            {filteredItems.length === 0 ? (
+              <tr>
+                <td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>
+                  {loading ? 'Loading...' : 'No inventory items. Add your first item above.'}
                 </td>
               </tr>
-            ))}
+            ) : (
+              filteredItems.map(item => (
+                <tr key={item.id}>
+                  <td>{item.name}</td>
+                  <td>{item.category}</td>
+                  <td>
+                    {editingItem === item.id ? (
+                      <input
+                        type="number"
+                        className="quantity-input"
+                        value={newQuantity}
+                        onChange={(e) => setNewQuantity(e.target.value)}
+                        min="0"
+                        step="0.01"
+                      />
+                    ) : (
+                      item.quantity
+                    )}
+                  </td>
+                  <td>{item.unit}</td>
+                  <td>
+                    <span className={`status-badge ${item.status === 'Low Stock' ? 'low-stock' : 'in-stock'}`}>
+                      {item.status}
+                    </span>
+                  </td>
+                  <td>
+                    {editingItem === item.id ? (
+                      <div className="edit-actions">
+                        <button className="save-btn" onClick={() => saveEdit(item.id)}>Save</button>
+                        <button className="cancel-btn" onClick={cancelEdit}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="item-actions">
+                        <button className="edit-btn" onClick={() => startEdit(item)}>Edit</button>
+                        <button
+                          className="action-btn"
+                          onClick={() => handleDeleteItem(item.id)}
+                          style={{ color: '#e74c3c' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
-      
+
       <div className="inventory-summary">
         <div className="summary-card">
           <h3>Total Items</h3>

@@ -10,7 +10,7 @@ function Reports() {
   const [error, setError] = useState(null);
   const [aiReport, setAiReport] = useState(null);
   const [range, setRange] = useState('30');
-  const [model, setModel] = useState('llama3.2:1b');
+  const [model, setModel] = useState('gemini-2.0-flash');
 
   useEffect(() => {
     const load = async () => {
@@ -161,7 +161,8 @@ function Reports() {
               <option value="all">All time</option>
             </select>
             <select className="small-select" value={model} onChange={e => setModel(e.target.value)}>
-              <option value="llama3.2:1b">llama3.2:1b</option>
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
             </select>
             <button className="btn-secondary" onClick={() => exportJSON(metrics, `metrics_${range}.json`)}>Export Metrics</button>
             <button className="btn-secondary" onClick={exportDailyCSV}>Export Daily CSV</button>

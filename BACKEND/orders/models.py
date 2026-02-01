@@ -1,32 +1,44 @@
 from django.db import models
+from django.contrib.auth.models import User
 from django.utils import timezone
 from decimal import Decimal
 
+
 class MenuItem(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='menu_items')
     name = models.CharField(max_length=100)
     price = models.DecimalField(max_digits=8, decimal_places=2)
     category = models.CharField(max_length=50)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.user.username})"
+
+    class Meta:
+        ordering = ['category', 'name']
 
 
 class Order(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
     customer_name = models.CharField(max_length=100, default="Unknown")
-    order_number = models.CharField(max_length=50, unique=True)
+    order_number = models.CharField(max_length=50)
     order_date = models.DateTimeField(default=timezone.now)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     def __str__(self):
         return f"Order {self.order_number} - {self.customer_name}"
 
+    class Meta:
+        ordering = ['-order_date']
+        # Order number unique per user
+        unique_together = ['user', 'order_number']
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     menu_item = models.ForeignKey(MenuItem, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
-    price = models.DecimalField(max_digits=8, decimal_places=2)  # Store price at time of order
+    price = models.DecimalField(max_digits=8, decimal_places=2)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
 
     def save(self, *args, **kwargs):
@@ -39,6 +51,7 @@ class OrderItem(models.Model):
 
 
 class BillingHistory(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='billing_history')
     order_number = models.CharField(max_length=50)
     customer_name = models.CharField(max_length=100)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -47,3 +60,6 @@ class BillingHistory(models.Model):
 
     def __str__(self):
         return f"Invoice {self.order_number} - {self.customer_name}"
+
+    class Meta:
+        ordering = ['-order_date']

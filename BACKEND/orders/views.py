@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, action
+from rest_framework.decorators import api_view, action, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -9,14 +10,29 @@ from decimal import Decimal
 from .models import MenuItem, Order, OrderItem, BillingHistory
 from .serializers import MenuItemSerializer, OrderSerializer, OrderItemSerializer, BillingHistorySerializer
 
+
 class MenuItemViewSet(viewsets.ModelViewSet):
-    queryset = MenuItem.objects.all()
     serializer_class = MenuItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Only return items for the logged-in user
+        return MenuItem.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        # Automatically assign the logged-in user
+        serializer.save(user=self.request.user)
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.all().order_by('-order_date')
     serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
     @action(detail=False, methods=['post'])
     def create_order(self, request):
@@ -34,6 +50,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 order_number = f"ORD-{timezone.now().strftime('%Y%m%d%H%M%S')}"
                 order = Order.objects.create(
+                    user=request.user,  # Assign to logged-in user
                     customer_name=customer_name,
                     order_number=order_number,
                     order_date=timezone.now()
@@ -48,7 +65,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                     if not menu_item_id:
                         return Response({"error": "Each item must have menu_item_id."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    menu_item = get_object_or_404(MenuItem, id=menu_item_id)
+                    # Only allow menu items owned by this user
+                    menu_item = get_object_or_404(MenuItem, id=menu_item_id, user=request.user)
                     subtotal = menu_item.price * quantity
 
                     OrderItem.objects.create(
@@ -64,7 +82,6 @@ class OrderViewSet(viewsets.ModelViewSet):
                 order.total = total
                 order.save()
 
-                # Return order with nested items
                 serializer = OrderSerializer(order)
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -73,6 +90,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def pay_order(request):
     order_id = request.data.get('order_id')
 
@@ -80,7 +98,8 @@ def pay_order(request):
         return Response({"error": "Order ID is required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        order = get_object_or_404(Order, id=order_id)
+        # Only allow paying orders owned by this user
+        order = get_object_or_404(Order, id=order_id, user=request.user)
 
         items_summary = [
             {
@@ -93,12 +112,16 @@ def pay_order(request):
         ]
 
         billing = BillingHistory.objects.create(
+            user=request.user,  # Assign to logged-in user
             order_number=order.order_number,
             customer_name=order.customer_name,
             total_amount=order.total,
             order_date=order.order_date,
             items_summary=json.dumps(items_summary)
         )
+
+        # Delete the order after payment
+        order.delete()
 
         return Response({
             "message": "Payment successful",
@@ -112,8 +135,14 @@ def pay_order(request):
 
 
 class BillingHistoryViewSet(viewsets.ModelViewSet):
-    queryset = BillingHistory.objects.all().order_by('-order_date')
     serializer_class = BillingHistorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return BillingHistory.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
     @action(detail=True, methods=['get'])
     def items(self, request, pk=None):

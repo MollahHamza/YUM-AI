@@ -1,13 +1,28 @@
 // Simple API client mapping frontend to backend endpoints
-// Use relative paths by default so Vite proxy handles CORS in dev
 const BASE_URL = import.meta.env.VITE_API_BASE || '';
 
-async function fetchJSON(path, { method = 'GET', body, headers } = {}) {
+// Gemini API key - can be overridden from user settings
+const DEFAULT_GEMINI_API_KEY = 'AIzaSyCgGDug9wjaCwxl8dMtaS4AUyNYPwEdW6A';
+
+// Get auth token from localStorage
+function getAuthToken() {
+  return localStorage.getItem('auth_token');
+}
+
+// Get auth headers
+function getAuthHeaders() {
+  const token = getAuthToken();
+  return token ? { 'Authorization': `Token ${token}` } : {};
+}
+
+async function fetchJSON(path, { method = 'GET', body, headers, requireAuth = true } = {}) {
   const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
+
   const opts = {
     method,
     headers: {
       'Content-Type': 'application/json',
+      ...(requireAuth ? getAuthHeaders() : {}),
       ...(headers || {}),
     },
   };
@@ -16,6 +31,13 @@ async function fetchJSON(path, { method = 'GET', body, headers } = {}) {
   }
   const res = await fetch(url, opts);
   if (!res.ok) {
+    // Handle 401 Unauthorized - redirect to login
+    if (res.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+      throw new Error('Session expired. Please login again.');
+    }
     const text = await res.text().catch(() => '');
     throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
   }
@@ -27,9 +49,23 @@ async function fetchJSON(path, { method = 'GET', body, headers } = {}) {
   return null;
 }
 
+export const AuthAPI = {
+  register: (payload) => fetchJSON('/users/register/', { method: 'POST', body: payload, requireAuth: false }),
+  login: (payload) => fetchJSON('/users/login/', { method: 'POST', body: payload, requireAuth: false }),
+  logout: () => fetchJSON('/users/logout/', { method: 'POST' }),
+  getProfile: () => fetchJSON('/users/profile/'),
+  updateProfile: (payload) => fetchJSON('/users/profile/update/', { method: 'PUT', body: payload }),
+  updateSettings: (payload) => fetchJSON('/users/settings/', { method: 'PUT', body: payload }),
+  changePassword: (payload) => fetchJSON('/users/change-password/', { method: 'POST', body: payload }),
+  checkUsername: (username) => fetchJSON(`/users/check-username/?username=${encodeURIComponent(username)}`, { requireAuth: false }),
+  checkEmail: (email) => fetchJSON(`/users/check-email/?email=${encodeURIComponent(email)}`, { requireAuth: false }),
+};
+
 export const OrdersAPI = {
-  // Mounted under /api/ via orders.urls
   getMenuItems: () => fetchJSON('/api/menu-items/'),
+  createMenuItem: (payload) => fetchJSON('/api/menu-items/', { method: 'POST', body: payload }),
+  updateMenuItem: (id, payload) => fetchJSON(`/api/menu-items/${id}/`, { method: 'PUT', body: payload }),
+  deleteMenuItem: (id) => fetchJSON(`/api/menu-items/${id}/`, { method: 'DELETE' }),
   listOrders: () => fetchJSON('/api/orders/'),
   getOrder: (id) => fetchJSON(`/api/orders/${id}/`),
   createOrder: (payload) => fetchJSON('/api/orders/create_order/', { method: 'POST', body: payload }),
@@ -57,21 +93,75 @@ export const DashboardAPI = {
   stats: () => fetchJSON('/dashboard/stats/'),
 };
 
-export const LLMAPI = {
-  chat: async ({ model = 'llama3.2:1b', messages = [], stream = false, options = {} }) => {
-    // Forward to local Ollama via Vite proxy
-    const res = await fetchJSON('/ollama/api/chat', {
+export const GeminiAPI = {
+  /**
+   * Chat with Gemini API
+   * @param {Object} options
+   * @param {string} options.model - Model name (default: gemini-2.0-flash)
+   * @param {Array} options.messages - Array of { role: 'user'|'model', content: string }
+   * @param {string} options.apiKey - Optional API key override
+   * @returns {Promise<Object>} Response with message content
+   */
+  chat: async ({ model = 'gemini-2.0-flash', messages = [], apiKey = null }) => {
+    const key = apiKey || localStorage.getItem('gemini_api_key') || DEFAULT_GEMINI_API_KEY;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+    // Convert messages to Gemini format
+    const contents = [];
+    let systemInstruction = null;
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemInstruction = msg.content;
+      } else {
+        contents.push({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }]
+        });
+      }
+    }
+
+    const requestBody = {
+      contents,
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 8192,
+      }
+    };
+
+    if (systemInstruction) {
+      requestBody.systemInstruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    const response = await fetch(endpoint, {
       method: 'POST',
-      body: {
-        model,
-        messages,
-        stream,
-        options,
+      headers: {
+        'Content-Type': 'application/json',
       },
-      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
     });
-    return res;
-  },
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    return {
+      message: {
+        content: content
+      }
+    };
+  }
 };
 
-export default { OrdersAPI, InventoryAPI, DashboardAPI, LLMAPI };
+// Legacy alias for backward compatibility
+export const LLMAPI = GeminiAPI;
+
+export default { AuthAPI, OrdersAPI, InventoryAPI, DashboardAPI, GeminiAPI, LLMAPI };
