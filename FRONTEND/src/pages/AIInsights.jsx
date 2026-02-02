@@ -3,6 +3,7 @@ import { OrdersAPI, InventoryAPI, LLMAPI } from '../lib/api';
 
 function AIInsights() {
   const [orders, setOrders] = useState([]);
+  const [billingHistory, setBillingHistory] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -16,12 +17,14 @@ function AIInsights() {
       setLoading(true);
       setError(null);
       try {
-        const [ordersRes, inventoryRes, menuRes] = await Promise.all([
+        const [ordersRes, billingRes, inventoryRes, menuRes] = await Promise.all([
           OrdersAPI.listOrders(),
+          OrdersAPI.getBillingHistory(),
           InventoryAPI.list(),
           OrdersAPI.getMenuItems(),
         ]);
         setOrders(Array.isArray(ordersRes) ? ordersRes : ordersRes?.value || []);
+        setBillingHistory(Array.isArray(billingRes) ? billingRes : billingRes?.value || []);
         setInventory(Array.isArray(inventoryRes) ? inventoryRes : inventoryRes?.value || []);
         setMenuItems(Array.isArray(menuRes) ? menuRes : menuRes?.value || []);
       } catch (e) {
@@ -37,12 +40,48 @@ function AIInsights() {
     setAiLoading(true);
     setError(null);
     try {
+      const menuMap = new Map(menuItems.map(m => [m.id, m]));
+
+      // Calculate sales data from both orders and billing history
+      const salesData = new Map();
+
+      // From current orders
+      for (const o of orders) {
+        for (const it of (o.items || [])) {
+          const item = menuMap.get(it.menu_item);
+          const name = item?.name || `Item ${it.menu_item}`;
+          const existing = salesData.get(name) || { name, category: item?.category || 'Menu', totalQty: 0, totalRevenue: 0 };
+          existing.totalQty += parseInt(it.quantity || 0, 10);
+          existing.totalRevenue += parseFloat(it.subtotal || 0);
+          salesData.set(name, existing);
+        }
+      }
+
+      // From billing history (paid orders)
+      for (const b of billingHistory) {
+        try {
+          const items = typeof b.items_summary === 'string' ? JSON.parse(b.items_summary) : b.items_summary;
+          if (Array.isArray(items)) {
+            for (const it of items) {
+              const name = it.name || 'Unknown';
+              const existing = salesData.get(name) || { name, category: it.category || 'Menu', totalQty: 0, totalRevenue: 0 };
+              existing.totalQty += parseInt(it.quantity || 0, 10);
+              existing.totalRevenue += parseFloat(it.subtotal || 0);
+              salesData.set(name, existing);
+            }
+          }
+        } catch {}
+      }
+
       const payload = {
-        orders,
-        inventory,
-        menuItems,
+        salesSummary: Array.from(salesData.values()),
+        inventory: inventory.map(i => ({ name: i.name, category: i.category, quantity: i.quantity, unit: i.unit, status: i.status })),
+        menuItems: menuItems.map(m => ({ name: m.name, price: m.price, category: m.category })),
+        totalOrders: orders.length + billingHistory.length,
+        totalRevenue: billingHistory.reduce((sum, b) => sum + parseFloat(b.total_amount || 0), 0),
       };
-      const system = "You are a restaurant operations AI. Provide actionable insights from data. Respond ONLY as JSON with keys: slow_movers (string[]), fast_sellers (string[]), price_opportunities (string[]), combo_suggestions (string[]), waste_reduction (string[]).";
+
+      const system = "You are a restaurant operations AI. Analyze the sales data, inventory levels, and menu items to provide actionable business insights. Respond ONLY as JSON with keys: slow_movers (string[] - items that sell poorly), fast_sellers (string[] - popular items), price_opportunities (string[] - pricing suggestions), combo_suggestions (string[] - items to bundle), waste_reduction (string[] - operational improvements).";
       const user = `Data: ${JSON.stringify(payload)}`;
       const res = await LLMAPI.chat({ model, stream: false, messages: [ { role: 'system', content: system }, { role: 'user', content: user } ] });
       const content = res?.message?.content || '';
@@ -62,7 +101,7 @@ function AIInsights() {
   };
 
   useEffect(() => {
-    if (!loading) {
+    if (!loading && (orders.length > 0 || billingHistory.length > 0 || inventory.length > 0)) {
       runAI();
     }
   }, [loading]);

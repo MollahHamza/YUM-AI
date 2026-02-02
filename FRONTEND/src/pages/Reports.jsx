@@ -3,6 +3,7 @@ import { OrdersAPI, InventoryAPI, LLMAPI } from '../lib/api';
 
 function Reports() {
   const [orders, setOrders] = useState([]);
+  const [billingHistory, setBillingHistory] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,12 +18,14 @@ function Reports() {
       setLoading(true);
       setError(null);
       try {
-        const [ordersRes, inventoryRes, menuRes] = await Promise.all([
+        const [ordersRes, billingRes, inventoryRes, menuRes] = await Promise.all([
           OrdersAPI.listOrders(),
+          OrdersAPI.getBillingHistory(),
           InventoryAPI.list(),
           OrdersAPI.getMenuItems(),
         ]);
         setOrders(Array.isArray(ordersRes) ? ordersRes : ordersRes?.value || []);
+        setBillingHistory(Array.isArray(billingRes) ? billingRes : billingRes?.value || []);
         setInventory(Array.isArray(inventoryRes) ? inventoryRes : inventoryRes?.value || []);
         setMenuItems(Array.isArray(menuRes) ? menuRes : menuRes?.value || []);
       } catch (e) {
@@ -34,47 +37,92 @@ function Reports() {
     load();
   }, []);
 
+  // Combine current orders and billing history into a unified format
+  const allOrders = useMemo(() => {
+    const menuMap = new Map(menuItems.map(m => [m.id, { name: m.name, price: parseFloat(m.price), category: m.category }]));
+
+    // Current unpaid orders
+    const currentOrders = orders.map(o => ({
+      order_date: o.order_date,
+      total: typeof o.total === 'string' ? parseFloat(o.total) : (o.total || 0),
+      items: (o.items || []).map(it => ({
+        name: menuMap.get(it.menu_item)?.name || `Item ${it.menu_item}`,
+        category: menuMap.get(it.menu_item)?.category || 'Menu',
+        quantity: parseInt(it.quantity || 0, 10),
+      })),
+    }));
+
+    // Paid orders from billing history
+    const paidOrders = billingHistory.map(b => {
+      let items = [];
+      try {
+        const parsed = typeof b.items_summary === 'string' ? JSON.parse(b.items_summary) : b.items_summary;
+        if (Array.isArray(parsed)) {
+          items = parsed.map(it => ({
+            name: it.name || 'Unknown',
+            category: it.category || 'Menu',
+            quantity: parseInt(it.quantity || 0, 10),
+          }));
+        }
+      } catch {}
+      return {
+        order_date: b.order_date,
+        total: typeof b.total_amount === 'string' ? parseFloat(b.total_amount) : (b.total_amount || 0),
+        items,
+      };
+    });
+
+    return [...currentOrders, ...paidOrders];
+  }, [orders, billingHistory, menuItems]);
+
   const filteredOrders = useMemo(() => {
-    if (range === 'all') return orders;
+    if (range === 'all') return allOrders;
     const days = parseInt(range, 10) || 30;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    return orders.filter(o => {
+    return allOrders.filter(o => {
       const d = o.order_date ? new Date(o.order_date) : null;
       return d ? d >= cutoff : true;
     });
-  }, [orders, range]);
+  }, [allOrders, range]);
 
   const metrics = useMemo(() => {
-    const menuMap = new Map(menuItems.map(m => [m.id, { name: m.name, price: parseFloat(m.price), category: m.category }]));
     const totalOrders = filteredOrders.length;
-    const totalSales = filteredOrders.reduce((sum, o) => sum + (typeof o.total === 'string' ? parseFloat(o.total) : (o.total || 0)), 0);
+    const totalSales = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
     const itemCounts = new Map();
     const dailySales = new Map();
+
     for (const o of filteredOrders) {
       const day = o.order_date ? new Date(o.order_date).toISOString().slice(0, 10) : 'unknown';
-      const orderTotal = typeof o.total === 'string' ? parseFloat(o.total) : (o.total || 0);
-      dailySales.set(day, (dailySales.get(day) || 0) + orderTotal);
-      const items = o.items || [];
-      for (const it of items) {
-        const id = it.menu_item;
-        const qty = parseInt(it.quantity || 0, 10);
-        itemCounts.set(id, (itemCounts.get(id) || 0) + qty);
+      dailySales.set(day, (dailySales.get(day) || 0) + (o.total || 0));
+
+      for (const it of o.items) {
+        const key = it.name;
+        const existing = itemCounts.get(key) || { name: it.name, category: it.category, qty: 0 };
+        existing.qty += it.quantity;
+        itemCounts.set(key, existing);
       }
     }
-    const topItems = Array.from(itemCounts.entries())
-      .map(([id, qty]) => ({ id, qty, name: menuMap.get(id)?.name || `Item ${id}`, category: menuMap.get(id)?.category || 'Menu' }))
+
+    const topItems = Array.from(itemCounts.values())
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 10);
+
     const lowStock = inventory.filter(i => (i.status || '').toLowerCase().includes('low') || (i.status || '').toLowerCase().includes('critical'));
+
+    // Sort daily sales by date
+    const sortedDailySales = Array.from(dailySales.entries())
+      .map(([date, amount]) => ({ date, amount: Number(amount.toFixed(2)) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
     return {
       totalOrders,
       totalSales: Number(totalSales.toFixed(2)),
       topItems,
-      dailySales: Array.from(dailySales.entries()).map(([date, amount]) => ({ date, amount: Number(amount.toFixed(2)) })),
+      dailySales: sortedDailySales,
       lowStock: lowStock.map(i => ({ name: i.name, category: i.category, quantity: i.quantity, unit: i.unit, status: i.status })),
     };
-  }, [filteredOrders, inventory, menuItems]);
+  }, [filteredOrders, inventory]);
 
   const runAI = async () => {
     setAiLoading(true);
@@ -107,7 +155,7 @@ function Reports() {
   };
 
   useEffect(() => {
-    if (!loading && orders.length > 0) {
+    if (!loading && (orders.length > 0 || billingHistory.length > 0)) {
       runAI();
     }
   }, [loading, range, model]);

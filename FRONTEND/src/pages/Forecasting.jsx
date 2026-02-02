@@ -3,6 +3,7 @@ import { OrdersAPI, InventoryAPI, LLMAPI } from '../lib/api';
 
 function Forecasting() {
   const [orders, setOrders] = useState([]);
+  const [billingHistory, setBillingHistory] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -16,12 +17,14 @@ function Forecasting() {
       setLoading(true);
       setError(null);
       try {
-        const [ordersRes, inventoryRes, menuRes] = await Promise.all([
+        const [ordersRes, billingRes, inventoryRes, menuRes] = await Promise.all([
           OrdersAPI.listOrders(),
+          OrdersAPI.getBillingHistory(),
           InventoryAPI.list(),
           OrdersAPI.getMenuItems(),
         ]);
         setOrders(Array.isArray(ordersRes) ? ordersRes : ordersRes?.value || []);
+        setBillingHistory(Array.isArray(billingRes) ? billingRes : billingRes?.value || []);
         setInventory(Array.isArray(inventoryRes) ? inventoryRes : inventoryRes?.value || []);
         setMenuItems(Array.isArray(menuRes) ? menuRes : menuRes?.value || []);
       } catch (e) {
@@ -35,31 +38,62 @@ function Forecasting() {
 
   const salesByItem = useMemo(() => {
     const map = new Map();
+    const menuMap = new Map(menuItems.map(m => [m.id, m.name]));
+
+    // Count from current orders
     for (const o of orders) {
       const items = o.items || [];
       for (const it of items) {
-        const id = it.menu_item;
+        const name = menuMap.get(it.menu_item) || `Item ${it.menu_item}`;
         const qty = parseInt(it.quantity || 0, 10);
-        map.set(id, (map.get(id) || 0) + qty);
+        map.set(name, (map.get(name) || 0) + qty);
       }
     }
+
+    // Count from billing history (paid orders)
+    for (const b of billingHistory) {
+      try {
+        const items = typeof b.items_summary === 'string' ? JSON.parse(b.items_summary) : b.items_summary;
+        if (Array.isArray(items)) {
+          for (const it of items) {
+            const name = it.name || 'Unknown';
+            const qty = parseInt(it.quantity || 0, 10);
+            map.set(name, (map.get(name) || 0) + qty);
+          }
+        }
+      } catch {}
+    }
+
     return map;
-  }, [orders]);
+  }, [orders, billingHistory, menuItems]);
 
   const runAI = async () => {
     setAiLoading(true);
     setError(null);
     try {
-      const menuMap = new Map(menuItems.map(m => [m.id, m]));
       const inventoryMap = new Map(inventory.map(i => [i.name.toLowerCase(), i]));
-      const data = Array.from(salesByItem.entries()).map(([id, qty]) => ({
-        id,
-        name: menuMap.get(id)?.name || `Item ${id}`,
-        category: menuMap.get(id)?.category || 'Menu',
+      const menuMap = new Map(menuItems.map(m => [m.name.toLowerCase(), m]));
+
+      const data = Array.from(salesByItem.entries()).map(([name, qty]) => ({
+        name,
+        category: menuMap.get(name.toLowerCase())?.category || 'Menu',
         sold_last_period: qty,
-        current_stock: inventoryMap.get((menuMap.get(id)?.name || `Item ${id}`).toLowerCase())?.quantity || null,
+        current_stock: inventoryMap.get(name.toLowerCase())?.quantity || null,
       }));
-      const system = "You are a demand forecasting assistant for a restaurant. Given item sales and current stock, forecast demand for the next 7 days and recommend reorder quantities. Respond ONLY as JSON array of objects with keys: item_name, predicted_next_7_days (number), recommended_reorder (number), reasoning (string).";
+
+      // Also add inventory items that haven't been sold but exist in stock
+      for (const inv of inventory) {
+        if (!salesByItem.has(inv.name)) {
+          data.push({
+            name: inv.name,
+            category: inv.category || 'Inventory',
+            sold_last_period: 0,
+            current_stock: inv.quantity,
+          });
+        }
+      }
+
+      const system = "You are a demand forecasting assistant for a restaurant. Given item sales and current stock, forecast demand for the next 7 days and recommend reorder quantities. Consider items with high sales velocity need more stock. Respond ONLY as JSON array of objects with keys: item_name, predicted_next_7_days (number), recommended_reorder (number), reasoning (string).";
       const user = `Data: ${JSON.stringify(data)}`;
       const res = await LLMAPI.chat({ model, stream: false, messages: [ { role: 'system', content: system }, { role: 'user', content: user } ] });
       const content = res?.message?.content || '';
@@ -79,7 +113,7 @@ function Forecasting() {
   };
 
   useEffect(() => {
-    if (!loading && orders.length > 0) {
+    if (!loading && (orders.length > 0 || billingHistory.length > 0 || inventory.length > 0)) {
       runAI();
     }
   }, [loading]);
