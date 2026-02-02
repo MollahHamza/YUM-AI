@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.utils import timezone
 from decimal import Decimal
-from orders.models import Order
+from orders.models import Order, BillingHistory
 from inventory.models import InventoryItem
 
 
@@ -12,12 +12,19 @@ from inventory.models import InventoryItem
 def dashboard_stats(request):
     today = timezone.now().date()
 
-    # Orders created today for this user only
+    # Current (unpaid) orders created today for this user
     todays_orders = Order.objects.filter(user=request.user, order_date__date=today)
-    total_orders_today = todays_orders.count()
+    pending_orders_count = todays_orders.count()
+    pending_sales = sum([o.total for o in todays_orders]) if todays_orders else Decimal('0.00')
 
-    # Total sales today for this user
-    total_sales_today = sum([o.total for o in todays_orders]) if todays_orders else Decimal('0.00')
+    # Paid orders (billing history) from today for this user
+    todays_billing = BillingHistory.objects.filter(user=request.user, order_date__date=today)
+    paid_orders_count = todays_billing.count()
+    paid_sales = sum([b.total_amount for b in todays_billing]) if todays_billing else Decimal('0.00')
+
+    # Combine both for totals
+    total_orders_today = pending_orders_count + paid_orders_count
+    total_sales_today = pending_sales + paid_sales
 
     # Total inventory items for this user
     total_inventory_items = InventoryItem.objects.filter(user=request.user).count()
