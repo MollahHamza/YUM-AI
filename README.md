@@ -15,27 +15,26 @@ The system integrates AI (Ollama) and ML forecasting to help restaurant owners r
 
 🚀 Current Status (23 Sept 2025)
 
-✅ ~40% of Frontend (ReactJS) completed
-❌ Backend (Django + FastAPI) not yet started
-❌ Database (PostgreSQL/MySQL) not integrated
-❌ AI/ML (Ollama + Prophet/LightGBM) pending
-❌ Deployment not yet done
+Frontend (ReactJS) 
+Backend (Django + FastAPI) 
+Database (PostgreSQL/MySQL) 
+AI/ML (Gemini2.5 Flash)
+
 
 🛠️ Tech Stack
 
 Frontend: ReactJS, HTML, CSS
 
-Backend (planned): Django (API Gateway), FastAPI (ML Service)
+Backend : Django (API Gateway), FastAPI (ML Service)
 
-Database (planned): PostgreSQL / MySQL
+Database : PostgreSQL / MySQL
 
-AI Runtime (planned): Ollama (Mistral, Phi3, Llama3)
+AI Runtime :Gemini2.5 Flash
+ML Libraries : Prophet, scikit-learn, LightGBM
 
-ML Libraries (planned): Prophet, scikit-learn, LightGBM
+Deployment : Docker, GitHub Actions
 
-Deployment (planned): Docker, GitHub Actions
-
-📂 Project Structure (current)
+📂 Project Structure 
 yumai-frontend/         # React frontend (40% done)
  ├── public/           
  ├── src/              
@@ -49,25 +48,12 @@ yumai-backend/          # (to be added later)
 ml-service/             # (to be added later)
 docs/                   # Proposal, designs, planning files
 
-📅 Project Timeline (Planned)
-
-Requirement Analysis: ✅ Done
-
-Design: ✅ Done
-
-Frontend Development: 🔄 In progress (40%)
-
-Backend + ML Integration: ⏳ Pending
-
-Testing & Debugging: ⏳ Pending
-
-Deployment & Demo: ⏳ Pending
 
 👥 Team Members
 Name	Reg. No.	Contribution
-Md. Sadman Saquib	2022331002	Backend, Database
+Md. Sadman Saquib	2022331002	Frontend, UI/UX
 Mollah Omar Hamza	2022331066	AI/ML Integration
-Ahmed Istiaque	2022331100	Frontend, UI/UX, Backend & Security
+Ahmed Istiaque	2022331100	 Backend,Database & Security
 📖 References
 
 Django & FastAPI Documentation
